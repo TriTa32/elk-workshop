@@ -1,21 +1,41 @@
+# Multi-stage build
 FROM gradle:4.10.3-jdk8-alpine AS build
+
+# Set working directory
 WORKDIR /home/gradle/project
 
-EXPOSE 8080
-
-USER root
-
+# Set environment
 ENV GRADLE_USER_HOME /home/gradle/project
 
-COPY . /home/gradle/project
+# Switch to root for permissions
+USER root
 
-RUN gradle build --no-daemon 
+# Copy only build files first for better caching
+COPY build.gradle settings.gradle gradle.properties ./
+COPY gradle ./gradle
+COPY gradlew ./
 
+# Download dependencies
+RUN chmod +x ./gradlew
+RUN ./gradlew --no-daemon build --info --stacktrace || true
 
+# Copy entire project
+COPY . .
+
+# Build the project, skipping tests
+RUN ./gradlew --no-daemon build -x test
+
+# Second stage
 FROM openjdk:8-jre-alpine
 
-WORKDIR /home/gradle/project/
+# Set working directory
+WORKDIR /app
 
-COPY --from=0 /home/gradle/project/build/libs/project-0.0.1-SNAPSHOT.jar .
+# Copy built jar from previous stage
+COPY --from=build /home/gradle/project/build/libs/*.jar app.jar
 
-ENTRYPOINT java -jar project-0.0.1-SNAPSHOT.jar
+# Expose port
+EXPOSE 8080
+
+# Entry point
+ENTRYPOINT ["java", "-jar", "app.jar"]
